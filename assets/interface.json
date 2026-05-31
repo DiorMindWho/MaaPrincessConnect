@@ -1,0 +1,70 @@
+{
+    // 本文件主要定义了通用 UI 的行为和显示内容
+    // 文档：https://maafw.xyz/docs/3.3-ProjectInterfaceV2
+    "interface_version": 2,
+    "name": "MaaPrincessConnect",
+    "label": "MaaPrincessConnect",
+    "description": "公主连结 Re:Dive 自动化助手，基于 MaaFramework 开发。",
+    "contact": "（在此填写 QQ 群或 Issue 链接）",
+    "license": "MIT",
+    "welcome": "欢迎使用 MaaPrincessConnect！\n\n请先在雷电模拟器中开启 ADB 调试，再在通用 UI 中选择对应实例连接。",
+    "github": "https://github.com/DiorMindWho/MaaPrincessConnect",
+    "version": "0.1.0",
+    "controller": [
+        {
+            "name": "雷电模拟器",
+            "label": "雷电模拟器",
+            "description": "通过 ADB 连接 Windows 上的雷电模拟器。请在模拟器设置中开启 ADB 调试。",
+            "type": "Adb",
+            "display_short_side": 720
+        }
+    ],
+    "resource": [
+        {
+            "name": "官服",
+            "label": "官服",
+            "description": "国服（官服）资源",
+            "path": [
+                "./resource"
+            ],
+            "controller": [
+                "雷电模拟器"
+            ]
+        },
+        {
+            "name": "B 服",
+            "label": "B 服",
+            "description": "哔哩哔哩服资源（可在 resource_bilibili 中放置 B 服差异覆盖）",
+            "path": [
+                "./resource"
+                // "./resource_bilibili"
+            ],
+            "controller": [
+                "雷电模拟器"
+            ]
+        }
+    ],
+    "agent": {
+        "child_exec": "python",
+        "child_args": [
+            "-u",
+            "../agent/main.py"
+        ]
+    },
+    "task": [
+        {
+            "name": "连接测试",
+            "label": "连接测试",
+            "entry": "MyTask1",
+            "default_check": true,
+            "description": "验证雷电模拟器连接与 Pipeline 基础流程。请在 pipeline 中完善 MyTask1 节点。"
+        },
+        {
+            "name": "Agent 示例",
+            "label": "Agent 示例",
+            "entry": "MyTask4",
+            "description": "测试 Custom 识别（my_reco_222）与动作（my_action_111），需 Agent 子进程正常运行。"
+        }
+    ],
+    "option": {}
+}
