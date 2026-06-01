@@ -12,6 +12,57 @@ Welcome, Agent! This document defines the development rules, standards, and engi
 
 ---
 
+## 📖 MaaFramework Core Concepts & Pipeline Architecture
+
+`MaaPrincessConnect` is powered by **MaaFramework**, a low-code/highly-customizable black-box game automation testing framework using image recognition and C++20. Below is a summary of the core concepts, objects, and pipeline protocols from MaaFramework (`D:\word\MaaFramework\AGENTS.md`):
+
+### 1. Core Terminology & Data Flow
+* **Node (节点)**: A single block/object in the Pipeline JSON that defines recognition rules, actions to take, and successors (`next`).
+* **Task (任务)**: A sequence of connected Nodes representing a logical automation workflow.
+* **Entry (入口)**: The starting Node of a Task.
+* **Pipeline (流水线)**: The sum of all Nodes in the pipeline directory.
+* **Bundle**: A standard resource package folder containing `pipeline`, `model`, and `image` directories.
+* **Resource (资源)**: Loaded/assembled runtime resource representation from one or more Bundles.
+* **Agent**: A decoupling mechanism allowing custom scripts to communicate with MaaFramework core across processes.
+
+### 2. Primary Framework Objects
+* **MaaResource**: Handles the loading of Pipeline JSONs, template images, and ML models.
+* **MaaController**: Handles device connections, screenshot captures, and inputs (ADB, Win32, PlayCover).
+* **MaaTasker**: Executes a task pipeline after binding a Resource and a Controller.
+* **MaaContext**: Created during runtime; provides control API, screenshot retrieval, and pipeline operations inside custom callbacks/scripts.
+
+### 3. Pipeline Protocol Cheatsheet
+
+#### Recognition Algorithms
+* `DirectHit`: Instantly matches without image processing.
+* `TemplateMatch`: Classical template matching (找图) using `template`, `threshold`, `roi`.
+* `FeatureMatch`: Perspective-distortion resistant feature matching using `template`, `count`, `detector`.
+* `ColorMatch`: Matches specified colors (找色) using `lower`, `upper`, `method`.
+* `OCR`: Optical character recognition using `expected`, `model`.
+* `NeuralNetworkClassify` / `NeuralNetworkDetect`: ML-based classification/object detection.
+* `Custom`: Delegates recognition to custom scripts (e.g. `custom_recognition`).
+
+#### Action Methods
+* `DoNothing`: Empty action.
+* `Click`: Left clicks/taps at `target`, with optional `target_offset`.
+* `LongPress`: Long presses at `target` for `duration`.
+* `Swipe`: Performs single-finger swipe from `begin` to `end` over `duration`.
+* `MultiSwipe`: Multi-finger complex gestures.
+* `ClickKey` / `InputText`: Key press or text input.
+* `StartApp` / `StopApp`: Launch/terminate an application by package name.
+* `Command` / `Shell`: Executes host OS commands or ADB shell commands (`cmd`).
+* `Custom`: Triggers a custom action script (e.g. `custom_action`).
+
+---
+
+## 🔍 Sibling Reference Project (M9A)
+
+* **M9A Project Reference**: 
+  We also use the **M9A** project (`D:\word\MaaFramework\M9A`) as our primary reference. M9A is a similar automation assistant built on MaaFramework for a different game.
+  * **When to Reference M9A**: If you have questions about best practices for scripting complex Python Agent logic, structural organization of custom action pipelines, or interface designs, check `D:\word\MaaFramework\M9A` for patterns and existing solutions.
+
+---
+
 ## 🚀 Elite Software Engineering Principles (AI Instructions)
 
 Always adhere to these industry-standard best practices to deliver clean, production-grade, and highly maintainable code:

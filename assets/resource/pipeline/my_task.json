@@ -1,5 +1,23 @@
 {
-    "MyTask1": {},
+    "MyTask1": {
+        "action": "ClickKey",
+        "key": 3,
+        "post_delay": 1000,
+        "next": [
+            "ClickGameIcon"
+        ]
+    },
+    "ClickGameIcon": {
+        "recognition": "OCR",
+        "expected": "公主连结",
+        "action": "Click",
+        "target_offset": [
+            0,
+            -80,
+            0,
+            0
+        ]
+    },
     "MyTask2": {},
     "MyTask3": {},
     "MyTask4": {

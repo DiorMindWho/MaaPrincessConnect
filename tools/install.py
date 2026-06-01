@@ -141,10 +141,38 @@ def install_agent():
     )
 
 
+def rename_executable():
+    mfa_exe_win = install_path / "MFAAvalonia.exe"
+    mfa_bin_unix = install_path / "MFAAvalonia"
+    
+    target_exe_win = install_path / "MaaPrincessConnect.exe"
+    target_bin_unix = install_path / "MaaPrincessConnect"
+    
+    if mfa_exe_win.exists():
+        print(f"Renaming {mfa_exe_win.name} to {target_exe_win.name}...")
+        try:
+            # Overwrite if exists
+            if target_exe_win.exists():
+                target_exe_win.unlink()
+            mfa_exe_win.rename(target_exe_win)
+        except Exception as e:
+            print(f"Failed to rename {mfa_exe_win.name}: {e}")
+    elif mfa_bin_unix.exists():
+        print(f"Renaming {mfa_bin_unix.name} to {target_bin_unix.name}...")
+        try:
+            # Overwrite if exists
+            if target_bin_unix.exists():
+                target_bin_unix.unlink()
+            mfa_bin_unix.rename(target_bin_unix)
+        except Exception as e:
+            print(f"Failed to rename {mfa_bin_unix.name}: {e}")
+
+
 if __name__ == "__main__":
     install_deps()
     install_resource()
     install_chores()
     install_agent()
+    rename_executable()
 
     print(f"Install to {install_path} successfully.")

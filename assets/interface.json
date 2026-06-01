@@ -21,17 +21,6 @@
     ],
     "resource": [
         {
-            "name": "官服",
-            "label": "官服",
-            "description": "国服（官服）资源",
-            "path": [
-                "./resource"
-            ],
-            "controller": [
-                "雷电模拟器"
-            ]
-        },
-        {
             "name": "B 服",
             "label": "B 服",
             "description": "哔哩哔哩服资源（可在 resource_bilibili 中放置 B 服差异覆盖）",
