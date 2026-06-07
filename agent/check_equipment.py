@@ -1,111 +1,191 @@
 import cv2
 import numpy as np
 import time
+import json
 from maa.agent.agent_server import AgentServer
 from maa.custom_recognition import CustomRecognition
 from maa.context import Context
+import os
+import datetime
+
+LOG_FILE = r"D:\word\MaaFramework\MaaPrincessConnect\install\debug\equipment_log.txt"
+
+def log_debug(msg: str):
+    print(msg)
+    try:
+        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"[{timestamp}] {msg}\n")
+    except Exception as e:
+        print(f"Failed to write to log: {e}")
 
 @AgentServer.custom_recognition("check_equipment_reco")
 class CheckEquipmentReco(CustomRecognition):
     def analyze(self, context: Context, argv: CustomRecognition.AnalyzeArg) -> CustomRecognition.AnalyzeResult:
-        image = argv.image
-        
-        # Load templates
-        img_dir = r"D:\word\MaaFramework\MaaPrincessConnect\assets\resource\image"
-        ex_tpl = cv2.imread(rf"{img_dir}\ex.png")
-        magic_tpl = cv2.imread(rf"{img_dir}\fullmagic.png")
-        physic_tpl = cv2.imread(rf"{img_dir}\fullphysic.png")
-        header_tpl = cv2.imread(rf"{img_dir}\equipmentheader.png")
-        
-        if any(t is None for t in [ex_tpl, magic_tpl, physic_tpl, header_tpl]):
-            print("check_equipment_reco: Missing template images.")
-            return CustomRecognition.AnalyzeResult(box=(0,0,0,0), detail="Templates missing")
+        try:
+            log_debug("="*50)
+            log_debug("[check_equipment_reco] Starting equipment grid iteration...")
+            
+            # Load templates
+            img_dir = r"D:\word\MaaFramework\MaaPrincessConnect\assets\resource\image"
+            ex_tpl = cv2.imread(rf"{img_dir}\ex.png")
+            header_tpl = cv2.imread(rf"{img_dir}\equipmentheader.png")
+            
+            if ex_tpl is None or header_tpl is None:
+                log_debug("[check_equipment_reco] Missing template images.")
+                return CustomRecognition.AnalyzeResult(box=(0,0,0,0), detail="Templates missing")
 
-        # Create masks to ignore the lock icons in the templates
-        # We assume the template has 2 columns, lock icons are roughly around 30%-45% and 80%-95% of width.
-        h, w = magic_tpl.shape[:2]
-        mask = np.ones_like(magic_tpl) * 255
-        mask[:, int(w*0.30):int(w*0.48)] = 0
-        mask[:, int(w*0.80):int(w*0.98)] = 0
+            last_grid_img = None
+            processed_count = 0
+        
+            # Dictionary to store recorded items to avoid printing duplicates across scrolls
+            recorded_equipments = {}
 
-        # 1. Find equipment header
-        res_h = cv2.matchTemplate(image, header_tpl, cv2.TM_CCOEFF_NORMED)
-        _, max_val_h, _, max_loc_h = cv2.minMaxLoc(res_h)
-        
-        header_y = max_loc_h[1] + header_tpl.shape[0] if max_val_h >= 0.7 else 0
-        
-        # Crop below header to search for EX icons
-        roi_img = image[header_y:, :]
-        
-        # 2. Find EX icons
-        res_ex = cv2.matchTemplate(roi_img, ex_tpl, cv2.TM_CCOEFF_NORMED)
-        loc = np.where(res_ex >= 0.8)
-        ex_pts = list(zip(*loc[::-1]))
-        
-        # Filter overlapping EX icons
-        filtered_ex = []
-        for pt in ex_pts:
-            if not any(abs(pt[0]-fp[0]) < 20 and abs(pt[1]-fp[1]) < 20 for fp in filtered_ex):
-                filtered_ex.append(pt)
+            while True:
+                # 1. Take fresh screenshot
+                image_future = context.tasker.controller.post_screencap().wait()
+                image = image_future.get()
+                if image is None:
+                    log_debug("[check_equipment_reco] Failed to get screenshot.")
+                    break
                 
-        # 3. Check each equipment block
-        # We'll search around the EX icon for the maxed stats
-        box_w, box_h = int(w * 1.2), int(h * 1.5)
-        
-        all_maxed = True
-        selected_click = None
-
-        for (x, y) in filtered_ex:
-            # The stats block usually appears below or next to the EX icon
-            # Let's crop a box large enough to contain the stats block
-            search_box = roi_img[max(0, y):y+box_h, max(0, x):x+box_w]
+                # 2. Find header to define grid Y-boundary
+                res_h = cv2.matchTemplate(image, header_tpl, cv2.TM_CCOEFF_NORMED)
+                _, max_val_h, _, max_loc_h = cv2.minMaxLoc(res_h)
+                header_y = max_loc_h[1] + header_tpl.shape[0] if max_val_h >= 0.7 else 0
             
-            if search_box.shape[0] < h or search_box.shape[1] < w:
-                continue
+                # 3. Find EX icons
+                res_ex = cv2.matchTemplate(image, ex_tpl, cv2.TM_CCOEFF_NORMED)
+                loc = np.where(res_ex >= 0.8)
+                ex_pts = list(zip(*loc[::-1]))
+            
+                # Filter overlapping and left-panel EX icons
+                filtered_ex = []
+                for pt in ex_pts:
+                    # Ignore left panel details EX icon
+                    if pt[0] < 550:
+                        continue
+                    # Ignore anything above header
+                    if pt[1] < header_y:
+                        continue
+                    
+                    if not any(abs(pt[0]-fp[0]) < 20 and abs(pt[1]-fp[1]) < 20 for fp in filtered_ex):
+                        filtered_ex.append(pt)
+                    
+                # Sort by Y (rows), then X (columns)
+                # Group by row: if Y difference is < 40, they are in the same row
+                filtered_ex.sort(key=lambda p: (p[1] // 40, p[0]))
+            
+                if not filtered_ex:
+                    log_debug("[check_equipment_reco] No equipment found in grid. Ending.")
+                    break
                 
-            # Use TM_SQDIFF_NORMED with mask: perfect match is 0.0
-            res_m = cv2.matchTemplate(search_box, magic_tpl, cv2.TM_SQDIFF_NORMED, mask=mask)
-            _, min_m, _, _ = cv2.minMaxLoc(res_m)
+                # 4. Check if grid has stopped moving (reached bottom)
+                # We crop the entire grid area on the right
+                grid_crop = image[header_y:720, 550:1280]
+                if last_grid_img is not None:
+                    # Calculate absolute difference between previous grid and current grid
+                    diff = cv2.absdiff(grid_crop, last_grid_img)
+                    if np.mean(diff) < 2.0:  # Very little change -> we hit the bottom
+                        log_debug("[check_equipment_reco] Grid hasn't moved. Reached bottom of the equipment list.")
+                        break
+                last_grid_img = grid_crop.copy()
             
-            res_p = cv2.matchTemplate(search_box, physic_tpl, cv2.TM_SQDIFF_NORMED, mask=mask)
-            _, min_p, _, _ = cv2.minMaxLoc(res_p)
+                # 5. Process each equipment in the currently visible grid
+                for idx, (x, y) in enumerate(filtered_ex):
+                    log_debug(f"[check_equipment_reco] Processing equipment {idx+1}/{len(filtered_ex)} at ({x}, {y})")
+                
+                    # Click the equipment (offset by half the EX icon size to hit the center of the equipment)
+                    # MUST cast to int because x and y are numpy.int64, which crashes C++ bindings
+                    click_x = int(x + ex_tpl.shape[1] // 2 + 20)
+                    click_y = int(y + ex_tpl.shape[0] // 2 + 20)
+                
+                    context.tasker.controller.post_click(click_x, click_y).wait()
+                    time.sleep(0.8) # Wait for left panel to render new details
+                
+                    # Take screenshot to run OCR on the left panel
+                    panel_img = context.tasker.controller.post_screencap().wait().get()
+                    if panel_img is None:
+                        continue
+                    
+                    # Run OCR specifically bounded to the left panel (x < 550)
+                    # We use the existing "OcrTask" node defined in my_task.json to avoid "node not found" errors
+                    override = {
+                        "OcrTask": {
+                            "recognition": "OCR",
+                            "expected": "",
+                            "roi": [0, 0, 550, 720]
+                        }
+                    }
+                    reco_detail = context.run_recognition("OcrTask", panel_img, pipeline_override=override)
+                
+                    if not reco_detail or not reco_detail.hit:
+                        continue
+                    
+                    # The OCR results are already parsed into a dictionary by the Python API
+                    try:
+                        ocr_data = reco_detail.raw_detail
+                        all_texts = ocr_data.get("all", [])
+                    except Exception as e:
+                        log_debug(f"Failed to extract OCR data: {e}")
+                        continue
+                
+                    # Sort OCR results top-to-bottom
+                    all_texts.sort(key=lambda t: t["box"][1])
+                
+                    equip_name = "Unknown Equipment"
+                    sub_stats = []
+                    found_substats_header = False
+                
+                    for t in all_texts:
+                        text_str = t["text"].strip()
+                        if not text_str:
+                            continue
+                        
+                        # Usually the first large text block is the name. Let's assume it's one of the first few lines.
+                        # Or we can just log all texts if we're not sure.
+                        # But the user specifically wants the name and 4 sub-stats under "副属性值"
+                        if "副属性" in text_str:
+                            found_substats_header = True
+                            continue
+                        
+                        if found_substats_header and len(sub_stats) < 4:
+                            # Sometimes stats are split across multiple OCR boxes, but we'll collect the next 4 blocks
+                            # that have numbers or '+' in them
+                            sub_stats.append(text_str)
+                
+                    # Find equipment name (usually the top-most text that isn't UI clutter)
+                    for t in all_texts:
+                        text_str = t["text"].strip()
+                        # Skip common UI artifacts or empty strings
+                        if len(text_str) > 1 and text_str not in ["返回", "主页"]:
+                            equip_name = text_str
+                            break
+                        
+                    # Create a unique key for this equipment based on its stats to avoid recording it multiple times
+                    equip_key = f"{equip_name}_{'-'.join(sub_stats)}"
+                    if equip_key not in recorded_equipments:
+                        recorded_equipments[equip_key] = True
+                        processed_count += 1
+                        log_debug(f"[{processed_count}] Name: {equip_name}")
+                        log_debug(f"    Stats: {sub_stats}")
+                        log_debug("-" * 30)
+
+                log_debug("[check_equipment_reco] Finished visible rows. Swiping down...")
+                # Swipe up on the grid area (scroll down the list)
+                # from (900, 600) to (900, 200) over 400ms
+                context.tasker.controller.post_swipe(900, 600, 900, 200, 400).wait()
+                time.sleep(1.5) # Wait for scrolling animation to settle
             
-            # If min is small enough, it means the stats perfectly match the maxed template
-            is_magic_max = min_m < 0.15
-            is_physic_max = min_p < 0.15
+            log_debug(f"[check_equipment_reco] Finished all equipment. Total processed: {processed_count}")
             
-            print(f"[check_equipment_reco] EX icon at ({x}, {y}) -> Magic diff: {min_m:.4f}, Physic diff: {min_p:.4f}")
-            
-            if not (is_magic_max or is_physic_max):
-                print(f"[check_equipment_reco] FOUND UNMAXED EQUIPMENT at ({x}, {y})!")
-                # This equipment is NOT maxed out! We should select it.
-                # Click the center of this equipment box
-                click_x = x + ex_tpl.shape[1] // 2
-                click_y = header_y + y + ex_tpl.shape[0] // 2
-                selected_click = (click_x, click_y)
-                all_maxed = False
-                break
-        
-        if selected_click:
-            print(f"[check_equipment_reco] Stopping task and clicking unmaxed equipment at {selected_click}")
-            # We found one!
+            # Once we are done recording, proceed to StopTask
             context.override_next(argv.node_name, ["StopTask"])
-            return CustomRecognition.AnalyzeResult(
-                box=(selected_click[0], selected_click[1], 10, 10),
-                detail="Selected unmaxed equipment"
-            )
-        
-        print("[check_equipment_reco] All visible equipments are maxed out. Swiping down...")
-        # If no EX found or all are maxed, we need to swipe down and loop
-        # We override the next node to ourselves to create a loop
-        context.override_next(argv.node_name, ["SelectEquipment"])
-        
-        # Swipe up (scroll down the list)
-        swipe_job = context.tasker.controller.post_swipe(640, 500, 640, 200, 400)
-        swipe_job.wait()
-        
-        # Add a short delay for the animation to settle
-        time.sleep(1.5)
-        
-        # Return an empty box to let the pipeline proceed to the overridden next node
-        return CustomRecognition.AnalyzeResult(box=(0,0,0,0), detail="Swiped down, continuing search")
+            return CustomRecognition.AnalyzeResult(box=(0,0,0,0), detail="Recorded all equipment")
+            
+        except Exception as e:
+            import traceback
+            log_debug(f"[check_equipment_reco] CRASHED WITH EXCEPTION: {e}")
+            log_debug(traceback.format_exc())
+            return CustomRecognition.AnalyzeResult(box=(0,0,0,0), detail="Crashed")

@@ -139,6 +139,10 @@ def install_agent():
         install_path / "agent",
         dirs_exist_ok=True,
     )
+    
+    req_file = working_dir / "requirements.txt"
+    if req_file.exists():
+        shutil.copy2(req_file, install_path / "requirements.txt")
 
 
 def rename_executable():
