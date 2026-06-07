@@ -49,6 +49,12 @@
             "description": "验证雷电模拟器连接与 Pipeline 基础流程。请在 pipeline 中完善 MyTask1 节点。"
         },
         {
+            "name": "究极炼成",
+            "label": "究极炼成",
+            "entry": "究极炼成",
+            "description": "自动刷取并选择未满属性的装备"
+        },
+        {
             "name": "Agent 示例",
             "label": "Agent 示例",
             "entry": "MyTask4",

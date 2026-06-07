@@ -1,22 +1,81 @@
 {
+    "究极炼成": {
+        "recognition": "OCR",
+        "expected": "我的主页|角色|强化",
+        "next": [
+            "Wait_For_GoToHomepage_Loop"
+        ],
+        "on_error": [
+            "MyTask1"
+        ]
+    },
+
     "MyTask1": {
         "action": "ClickKey",
         "key": 3,
         "post_delay": 1000,
-        "next": [
-            "ClickGameIcon"
-        ]
+        "next": ["Wait_For_ClickGameIcon_Loop"]
     },
+
+    "Wait_For_ClickGameIcon_Loop": { "action": "DoNothing", "pre_delay": 500, "next": ["ClickGameIcon"], "on_error": ["[JumpBack]Wait_For_ClickGameIcon_Loop"] },
     "ClickGameIcon": {
         "recognition": "OCR",
         "expected": "公主连结",
         "action": "Click",
-        "target_offset": [
-            0,
-            -80,
-            0,
-            0
-        ]
+        "target_offset": [0, -80, 0, 0],
+        "next": ["Wait_For_WaitStartGame_Loop"]
+    },
+
+    "Wait_For_WaitStartGame_Loop": { "action": "DoNothing", "pre_delay": 1000, "next": ["WaitStartGame"], "on_error": ["[JumpBack]Wait_For_WaitStartGame_Loop"] },
+    "WaitStartGame": {
+        "recognition": "OCR",
+        "expected": "点击屏幕|开始游戏",
+        "action": "Click",
+        "target": [640, 360, 10, 10], 
+        "next": ["Wait_For_GoToHomepage_Loop"]
+    },
+
+    "Wait_For_GoToHomepage_Loop": { "action": "DoNothing", "pre_delay": 1000, "next": ["GoToHomepage"], "on_error": ["[JumpBack]Wait_For_GoToHomepage_Loop"] },
+    "GoToHomepage": {
+        "recognition": "OCR",
+        "expected": "我的主页",
+        "action": "Click",
+        "next": ["Wait_For_UltimateRefining_Loop"]
+    },
+
+    "Wait_For_UltimateRefining_Loop": { "action": "DoNothing", "pre_delay": 1000, "next": ["UltimateRefining"], "on_error": ["[JumpBack]Wait_For_UltimateRefining_Loop"] },
+    "UltimateRefining": {
+        "recognition": "OCR",
+        "expected": "究极炼成",
+        "action": "Click",
+        "next": ["Wait_For_GearSelect_Loop"]
+    },
+
+    "Wait_For_GearSelect_Loop": { "action": "DoNothing", "pre_delay": 1000, "next": ["GearSelect"], "on_error": ["[JumpBack]Wait_For_GearSelect_Loop"] },
+    "GearSelect": {
+        "recognition": "TemplateMatch",
+        "template": "gearselect.png",
+        "action": "Click",
+        "next": ["Wait_For_EquipmentHeader_Loop"]
+    },
+
+    "Wait_For_EquipmentHeader_Loop": { "action": "DoNothing", "pre_delay": 1000, "next": ["EquipmentHeader"], "on_error": ["[JumpBack]Wait_For_EquipmentHeader_Loop"] },
+    "EquipmentHeader": {
+        "recognition": "TemplateMatch",
+        "template": "equipmentheader.png",
+        "next": ["Wait_For_SelectEquipment_Loop"]
+    },
+
+    "Wait_For_SelectEquipment_Loop": { "action": "DoNothing", "pre_delay": 500, "next": ["SelectEquipment"], "on_error": ["[JumpBack]Wait_For_SelectEquipment_Loop"] },
+    "SelectEquipment": {
+        "recognition": "Custom",
+        "custom_recognition": "check_equipment_reco",
+        "action": "Click",
+        "next": ["StopTask"]
+    },
+    
+    "StopTask": {
+        "action": "DoNothing"
     },
     "MyTask2": {},
     "MyTask3": {},
