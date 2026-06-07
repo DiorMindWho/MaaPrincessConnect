@@ -134,37 +134,77 @@ class CheckEquipmentReco(CustomRecognition):
                     # Sort OCR results top-to-bottom
                     all_texts.sort(key=lambda t: t["box"][1])
                 
-                    equip_name = "Unknown Equipment"
                     sub_stats = []
-                    found_substats_header = False
+                    stat_boxes = []
                 
+                    # Collect all text boxes in the stats region
+                    log_debug(f"--- RAW STATS OCR DUMP ---")
                     for t in all_texts:
-                        text_str = t["text"].strip()
-                        if not text_str:
-                            continue
+                        box = t.get("box", [0, 0, 0, 0])
+                        x_box, y_box = box[0], box[1]
+                        text_str = t.get("text", "").strip()
                         
-                        # Usually the first large text block is the name. Let's assume it's one of the first few lines.
-                        # Or we can just log all texts if we're not sure.
-                        # But the user specifically wants the name and 4 sub-stats under "副属性值"
-                        if "副属性" in text_str:
-                            found_substats_header = True
-                            continue
-                        
-                        if found_substats_header and len(sub_stats) < 4:
-                            # Sometimes stats are split across multiple OCR boxes, but we'll collect the next 4 blocks
-                            # that have numbers or '+' in them
-                            sub_stats.append(text_str)
+                        if 30 <= x_box <= 560 and 280 <= y_box <= 450:
+                            log_debug(f"  Box: {box} | Text: '{text_str}'")
+                            if len(text_str) > 0 and text_str not in ["副属性值"]:
+                                stat_boxes.append((x_box, y_box, text_str))
+                    log_debug(f"--------------------------")
                 
-                    # Find equipment name (usually the top-most text that isn't UI clutter)
+                    # Sort by Y (tolerance 15 pixels for same row), then X
+                    stat_boxes.sort(key=lambda b: (b[1] // 15, b[0]))
+                
+                    current_key = None
+                    import re
+                
+                    for x_stat, y_stat, text in stat_boxes:
+                        if "尚未" in text:
+                            sub_stats.append({"尚未炼成。": ""})
+                            current_key = None
+                        else:
+                            text_clean = text.strip()
+                            match = re.search(r"[\+\-]?(\d+(?:\.\d+)?%?)$", text_clean)
+                            if match:
+                                val_str = match.group(1)
+                                # Try to parse as int or float if it's not a percentage, or just keep as string
+                                # Keeping as string is safest to preserve format like '2.4%'
+                                
+                                # Extract the name part
+                                name_part = text_clean[:match.start()].strip()
+                                # Remove trailing colons, plus signs, and spaces
+                                name_part = re.sub(r"[\+\s:]+$", "", name_part).strip()
+                                
+                                if name_part:
+                                    sub_stats.append({name_part: val_str})
+                                    current_key = None
+                                else:
+                                    if current_key:
+                                        sub_stats.append({current_key: val_str})
+                                        current_key = None
+                            else:
+                                # Text without numbers at the end -> probably a stat name
+                                # Ignore common noise
+                                if len(text) > 1:
+                                    current_key = text
+                
+                    # Verify exactly 4 stats were extracted
+                    assert len(sub_stats) == 4, f"Expected exactly 4 stats, but got {len(sub_stats)}: {sub_stats}"
+                
+                    # Find equipment name by checking if the OCR box falls within the target area
+                    equip_name = "Unknown Equipment"
+                    # User specified area: x: 140 to 400, y: 100 to 140
                     for t in all_texts:
-                        text_str = t["text"].strip()
-                        # Skip common UI artifacts or empty strings
-                        if len(text_str) > 1 and text_str not in ["返回", "主页"]:
-                            equip_name = text_str
-                            break
+                        box = t.get("box", [0, 0, 0, 0])
+                        x_box, y_box = box[0], box[1]
+                        text_str = t.get("text", "").strip()
+                        
+                        # We add a small tolerance margin to the coordinates to be safe
+                        if 120 <= x_box <= 420 and 90 <= y_box <= 150:
+                            if len(text_str) > 1 and text_str not in ["取消", "返回"]:
+                                equip_name = text_str
+                                break
                         
                     # Create a unique key for this equipment based on its stats to avoid recording it multiple times
-                    equip_key = f"{equip_name}_{'-'.join(sub_stats)}"
+                    equip_key = f"{equip_name}_{'-'.join(str(s) for s in sub_stats)}"
                     if equip_key not in recorded_equipments:
                         recorded_equipments[equip_key] = True
                         processed_count += 1
