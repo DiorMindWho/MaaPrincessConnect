@@ -20,6 +20,16 @@
 
 请阅读[如何开发](./docs/zh_cn/develop/how_to_develop.md)
 
+### 本地测试与构建 (Local Testing & Rebuilding)
+
+在修改了 `assets` 流水线配置后，如果您已经配置好了本地依赖（MaaFramework 核心库与 MFAAvalonia 运行器），只需运行以下命令即可快速更新并打包本地测试版本：
+
+```bash
+python tools/install.py v1.0.0 win x86_64
+```
+
+生成的可执行程序位于 `install/` 目录下，可直接双击运行。
+
 ## 生态共建
 
 MAA 正计划建设为一类项目，而非舟的单一软件。
