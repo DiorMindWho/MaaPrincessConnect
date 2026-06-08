@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import time
 import json
+import re
 from maa.agent.agent_server import AgentServer
 from maa.custom_recognition import CustomRecognition
 from maa.context import Context
@@ -131,65 +132,7 @@ class CheckEquipmentReco(CustomRecognition):
                         log_debug(f"Failed to extract OCR data: {e}")
                         continue
                 
-                    # Sort OCR results top-to-bottom
-                    all_texts.sort(key=lambda t: t["box"][1])
-                
-                    sub_stats = []
-                    stat_boxes = []
-                
-                    # Collect all text boxes in the stats region
-                    log_debug(f"--- RAW STATS OCR DUMP ---")
-                    for t in all_texts:
-                        box = t.get("box", [0, 0, 0, 0])
-                        x_box, y_box = box[0], box[1]
-                        text_str = t.get("text", "").strip()
-                        
-                        if 30 <= x_box <= 560 and 280 <= y_box <= 450:
-                            log_debug(f"  Box: {box} | Text: '{text_str}'")
-                            if len(text_str) > 0 and text_str not in ["副属性值"]:
-                                stat_boxes.append((x_box, y_box, text_str))
-                    log_debug(f"--------------------------")
-                
-                    # Sort by Y (tolerance 15 pixels for same row), then X
-                    stat_boxes.sort(key=lambda b: (b[1] // 15, b[0]))
-                
-                    current_key = None
-                    import re
-                
-                    for x_stat, y_stat, text in stat_boxes:
-                        if "尚未" in text:
-                            sub_stats.append({"尚未炼成。": ""})
-                            current_key = None
-                        else:
-                            text_clean = text.strip()
-                            match = re.search(r"[\+\-]?(\d+(?:\.\d+)?%?)$", text_clean)
-                            if match:
-                                val_str = match.group(1)
-                                # Try to parse as int or float if it's not a percentage, or just keep as string
-                                # Keeping as string is safest to preserve format like '2.4%'
-                                
-                                # Extract the name part
-                                name_part = text_clean[:match.start()].strip()
-                                # Remove trailing colons, plus signs, and spaces
-                                name_part = re.sub(r"[\+\s:]+$", "", name_part).strip()
-                                
-                                if name_part:
-                                    sub_stats.append({name_part: val_str})
-                                    current_key = None
-                                else:
-                                    if current_key:
-                                        sub_stats.append({current_key: val_str})
-                                        current_key = None
-                            else:
-                                # Text without numbers at the end -> probably a stat name
-                                # Ignore common noise
-                                if len(text) > 1:
-                                    current_key = text
-                
-                    # Verify exactly 4 stats were extracted
-                    assert len(sub_stats) == 4, f"Expected exactly 4 stats, but got {len(sub_stats)}: {sub_stats}"
-                
-                    # Find equipment name by checking if the OCR box falls within the target area
+                    # We keep the full-panel OCR just for the equipment name since it works perfectly
                     equip_name = "Unknown Equipment"
                     # User specified area: x: 140 to 400, y: 100 to 140
                     for t in all_texts:
@@ -202,6 +145,69 @@ class CheckEquipmentReco(CustomRecognition):
                             if len(text_str) > 1 and text_str not in ["取消", "返回"]:
                                 equip_name = text_str
                                 break
+                    
+                    # Targeted ROI Scanning for Sub-Stats
+                    # By cropping the OCR to exactly where the names and values are, we force the engine 
+                    # to not treat small digits as background noise.
+                    # Format: [x, y, width, height]
+                    stat_rois = [
+                        # Row 1
+                        {"type": "name", "roi": [30, 310, 200, 35]},
+                        {"type": "val",  "roi": [240, 310, 55, 35]},
+                        {"type": "name", "roi": [295, 310, 185, 35]},
+                        {"type": "val",  "roi": [480, 310, 80, 35]},
+                        # Row 2
+                        {"type": "name", "roi": [30, 348, 200, 35]},
+                        {"type": "val",  "roi": [240, 348, 55, 35]},
+                        {"type": "name", "roi": [295, 348, 185, 35]},
+                        {"type": "val",  "roi": [480, 348, 80, 35]},
+                    ]
+                    
+                    sub_stats = []
+                    current_key = None
+                    
+                    for idx, r in enumerate(stat_rois):
+                        # Crop the image to the exact ROI
+                        x, y, w, h = r["roi"]
+                        crop_img = panel_img[y:y+h, x:x+w]
+                        
+                        # Run OCR on the isolated snippet
+                        crop_override = {
+                            "OcrTask": {
+                                "recognition": "OCR",
+                                "expected": ""
+                            }
+                        }
+                        crop_reco = context.run_recognition("OcrTask", crop_img, pipeline_override=crop_override)
+                        
+                        text_str = ""
+                        if crop_reco and crop_reco.hit:
+                            text_str = "".join([t.get("text", "") for t in crop_reco.raw_detail.get("all", [])]).strip()
+                        
+                        if r["type"] == "name":
+                            if "尚未" in text_str:
+                                sub_stats.append({"尚未炼成。": ""})
+                                current_key = None
+                            else:
+                                # Clean up noise, keep only Chinese, English letters, and numbers
+                                name_clean = re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9]", "", text_str)
+                                if len(name_clean) > 1:
+                                    current_key = name_clean
+                                else:
+                                    current_key = None
+                        else:
+                            if current_key:
+                                # Clean value and pair it
+                                val_clean = text_str.replace(" ", "")
+                                if val_clean:
+                                    sub_stats.append({current_key: val_clean})
+                                else:
+                                    # OCR completely missed it even with ROI
+                                    sub_stats.append({current_key: "???"})
+                                current_key = None
+                    
+                    # Verify exactly 4 stats were extracted
+                    assert len(sub_stats) == 4, f"Expected exactly 4 stats, but got {len(sub_stats)}: {sub_stats}"
                         
                     # Create a unique key for this equipment based on its stats to avoid recording it multiple times
                     equip_key = f"{equip_name}_{'-'.join(str(s) for s in sub_stats)}"
