@@ -42,7 +42,11 @@ class CheckEquipmentReco(CustomRecognition):
         
             # Dictionary to store recorded items to avoid printing duplicates across scrolls
             recorded_equipments = {}
-
+        
+            # On the first page, we start from the 1st equipment. 
+            # On subsequent pages, we skip the first 5 because they were the bottom row of the previous page.
+            start_idx = 0
+            
             while True:
                 # 1. Take fresh screenshot
                 image_future = context.tasker.controller.post_screencap().wait()
@@ -95,6 +99,9 @@ class CheckEquipmentReco(CustomRecognition):
             
                 # 5. Process each equipment in the currently visible grid
                 for idx, (x, y) in enumerate(filtered_ex):
+                    if idx < start_idx:
+                        continue
+                        
                     log_debug(f"[check_equipment_reco] Processing equipment {idx+1}/{len(filtered_ex)} at ({x}, {y})")
                 
                     # Click the equipment (offset by half the EX icon size to hit the center of the equipment)
@@ -219,10 +226,19 @@ class CheckEquipmentReco(CustomRecognition):
                         log_debug("-" * 30)
 
                 log_debug("[check_equipment_reco] Finished visible rows. Swiping down...")
-                # Swipe up on the grid area (scroll down the list)
-                # from (900, 600) to (900, 200) over 400ms
-                context.tasker.controller.post_swipe(900, 600, 900, 200, 400).wait()
+                # Swipe exactly one row up by dragging the 10th equipment straight up to the 5th equipment's Y level
+                if len(filtered_ex) >= 10:
+                    x_10, y_10 = filtered_ex[9]
+                    _, y_5 = filtered_ex[4]
+                    context.tasker.controller.post_swipe(int(x_10), int(y_10), int(x_10), int(y_5), 400).wait()
+                else:
+                    context.tasker.controller.post_swipe(900, 600, 900, 200, 400).wait()
+                    
                 time.sleep(1.5) # Wait for scrolling animation to settle
+                
+                # The old bottom row (equipments 6-10) is now the new top row (equipments 1-5).
+                # We already scanned them, so start scanning from the 6th equipment (index 5) on the next page!
+                start_idx = 5
             
             log_debug(f"[check_equipment_reco] Finished all equipment. Total processed: {processed_count}")
             
