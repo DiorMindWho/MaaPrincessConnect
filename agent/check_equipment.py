@@ -24,6 +24,62 @@ def log_debug(msg: str):
     except Exception as e:
         print(f"Failed to write to log: {e}")
 
+def scan_sub_stats(context: Context, image: np.ndarray, base_x: int, base_y: int):
+    stat_rois = [
+        # Row 1
+        {"type": "name", "roi": [0, 0, 200, 35]},
+        {"type": "val",  "roi": [210, 0, 55, 35]},
+        {"type": "name", "roi": [265, 0, 185, 35]},
+        {"type": "val",  "roi": [450, 0, 80, 35]},
+        # Row 2
+        {"type": "name", "roi": [0, 38, 200, 35]},
+        {"type": "val",  "roi": [210, 38, 55, 35]},
+        {"type": "name", "roi": [265, 38, 185, 35]},
+        {"type": "val",  "roi": [450, 38, 80, 35]},
+    ]
+    
+    sub_stats = []
+    current_key = None
+    
+    for idx, r in enumerate(stat_rois):
+        dx, dy, w, h = r["roi"]
+        x = base_x + dx
+        y = base_y + dy
+        crop_img = image[y:y+h, x:x+w]
+        
+        crop_override = {
+            "OcrTask": {
+                "recognition": "OCR",
+                "expected": ""
+            }
+        }
+        crop_reco = context.run_recognition("OcrTask", crop_img, pipeline_override=crop_override)
+        
+        text_str = ""
+        if crop_reco and crop_reco.hit:
+            text_str = "".join([t.get("text", "") for t in crop_reco.raw_detail.get("all", [])]).strip()
+        
+        if r["type"] == "name":
+            if "尚未" in text_str:
+                sub_stats.append({"尚未炼成。": ""})
+                current_key = None
+            else:
+                name_clean = re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9]", "", text_str)
+                if len(name_clean) > 1:
+                    current_key = name_clean
+                else:
+                    current_key = None
+        else:
+            if current_key:
+                val_clean = text_str.replace(" ", "")
+                if val_clean:
+                    sub_stats.append({current_key: val_clean})
+                else:
+                    sub_stats.append({current_key: "???"})
+                current_key = None
+                
+    return sub_stats
+
 @AgentServer.custom_recognition("check_equipment_reco")
 class CheckEquipmentReco(CustomRecognition):
     def analyze(self, context: Context, argv: CustomRecognition.AnalyzeArg) -> CustomRecognition.AnalyzeResult:
@@ -159,64 +215,7 @@ class CheckEquipmentReco(CustomRecognition):
                                 break
                     
                     # Targeted ROI Scanning for Sub-Stats
-                    # By cropping the OCR to exactly where the names and values are, we force the engine 
-                    # to not treat small digits as background noise.
-                    # Format: [x, y, width, height]
-                    stat_rois = [
-                        # Row 1
-                        {"type": "name", "roi": [30, 310, 200, 35]},
-                        {"type": "val",  "roi": [240, 310, 55, 35]},
-                        {"type": "name", "roi": [295, 310, 185, 35]},
-                        {"type": "val",  "roi": [480, 310, 80, 35]},
-                        # Row 2
-                        {"type": "name", "roi": [30, 348, 200, 35]},
-                        {"type": "val",  "roi": [240, 348, 55, 35]},
-                        {"type": "name", "roi": [295, 348, 185, 35]},
-                        {"type": "val",  "roi": [480, 348, 80, 35]},
-                    ]
-                    
-                    sub_stats = []
-                    current_key = None
-                    
-                    for idx, r in enumerate(stat_rois):
-                        # Crop the image to the exact ROI
-                        x, y, w, h = r["roi"]
-                        crop_img = panel_img[y:y+h, x:x+w]
-                        
-                        # Run OCR on the isolated snippet
-                        crop_override = {
-                            "OcrTask": {
-                                "recognition": "OCR",
-                                "expected": ""
-                            }
-                        }
-                        crop_reco = context.run_recognition("OcrTask", crop_img, pipeline_override=crop_override)
-                        
-                        text_str = ""
-                        if crop_reco and crop_reco.hit:
-                            text_str = "".join([t.get("text", "") for t in crop_reco.raw_detail.get("all", [])]).strip()
-                        
-                        if r["type"] == "name":
-                            if "尚未" in text_str:
-                                sub_stats.append({"尚未炼成。": ""})
-                                current_key = None
-                            else:
-                                # Clean up noise, keep only Chinese, English letters, and numbers
-                                name_clean = re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9]", "", text_str)
-                                if len(name_clean) > 1:
-                                    current_key = name_clean
-                                else:
-                                    current_key = None
-                        else:
-                            if current_key:
-                                # Clean value and pair it
-                                val_clean = text_str.replace(" ", "")
-                                if val_clean:
-                                    sub_stats.append({current_key: val_clean})
-                                else:
-                                    # OCR completely missed it even with ROI
-                                    sub_stats.append({current_key: "???"})
-                                current_key = None
+                    sub_stats = scan_sub_stats(context, panel_img, 30, 310)
                     
                     # Verify exactly 4 stats were extracted
                     assert len(sub_stats) == 4, f"Expected exactly 4 stats, but got {len(sub_stats)}: {sub_stats}"
@@ -300,7 +299,283 @@ class EnhanceEquipmentAction(CustomAction):
                 log_debug(f"    Stats: {lowest_equip['stats']}")
                 log_debug(f"    Total Penetration: {lowest_val}")
             else:
-                log_debug("[enhance_equipment_action] No equipment with 物理防御贯穿 or 魔法防御贯穿 found.")
+                log_debug("[enhance_equipment_action] No equipment found.")
+                return True
+                
+            # --- NEW WORKFLOW ---
+            # 1. Scroll back to top
+            log_debug("[enhance_equipment_action] Scrolling back to top...")
+            for _ in range(3):
+                context.tasker.controller.post_swipe(900, 200, 900, 600, 300).wait()
+                time.sleep(0.5)
+            
+            # Wait for list to settle
+            time.sleep(2)
+            
+            # 2. Iterate and select the target equipment
+            img_dir = r"D:\word\MaaFramework\MaaPrincessConnect\assets\resource\image"
+            ex_tpl = cv2.imread(rf"{img_dir}\ex.png")
+            header_tpl = cv2.imread(rf"{img_dir}\equipmentheader.png")
+            
+            target_found = False
+            last_grid_img = None
+            
+            while not target_found:
+                image_future = context.tasker.controller.post_screencap().wait()
+                image = image_future.get()
+                if image is None:
+                    break
+                    
+                res_h = cv2.matchTemplate(image, header_tpl, cv2.TM_CCOEFF_NORMED)
+                _, max_val_h, _, max_loc_h = cv2.minMaxLoc(res_h)
+                header_y = max_loc_h[1] + header_tpl.shape[0] if max_val_h >= 0.7 else 0
+                
+                res_ex = cv2.matchTemplate(image, ex_tpl, cv2.TM_CCOEFF_NORMED)
+                loc = np.where(res_ex >= 0.8)
+                ex_pts = list(zip(*loc[::-1]))
+                
+                filtered_ex = []
+                for pt in ex_pts:
+                    if pt[0] < 550: continue
+                    if pt[1] < header_y: continue
+                    if not any(abs(pt[0]-fp[0]) < 20 and abs(pt[1]-fp[1]) < 20 for fp in filtered_ex):
+                        filtered_ex.append(pt)
+                        
+                filtered_ex.sort(key=lambda p: (p[1] // 40, p[0]))
+                
+                if not filtered_ex:
+                    break
+                    
+                grid_crop = image[header_y:720, 550:1280]
+                if last_grid_img is not None:
+                    diff = cv2.absdiff(grid_crop, last_grid_img)
+                    if np.mean(diff) < 2.0:
+                        break
+                last_grid_img = grid_crop.copy()
+                
+                for idx, (x, y) in enumerate(filtered_ex):
+                    click_x = int(x + ex_tpl.shape[1] // 2 + 20)
+                    click_y = int(y + ex_tpl.shape[0] // 2 + 20)
+                    
+                    context.tasker.controller.post_click(click_x, click_y).wait()
+                    time.sleep(0.8)
+                    
+                    panel_img = context.tasker.controller.post_screencap().wait().get()
+                    if panel_img is None: continue
+                    
+                    override = { "OcrTask": { "recognition": "OCR", "expected": "", "roi": [120, 90, 300, 60] } }
+                    reco_detail = context.run_recognition("OcrTask", panel_img, pipeline_override=override)
+                    
+                    equip_name = "Unknown"
+                    if reco_detail and reco_detail.hit:
+                        texts = [t.get("text", "").strip() for t in reco_detail.raw_detail.get("all", [])]
+                        for text_str in texts:
+                            if len(text_str) > 1 and text_str not in ["取消", "返回"]:
+                                equip_name = text_str
+                                break
+                    
+                    if equip_name == lowest_equip["name"]:
+                        current_stats = scan_sub_stats(context, panel_img, 30, 310)
+                        if str(current_stats) == str(lowest_equip["stats"]):
+                            log_debug(f"[enhance_equipment_action] Target equipment found and selected!")
+                            target_found = True
+                            break
+                            
+                if target_found:
+                    break
+                    
+                if len(filtered_ex) >= 10:
+                    x_10, y_10 = filtered_ex[9]
+                    _, y_5 = filtered_ex[4]
+                    context.tasker.controller.post_swipe(int(x_10), int(y_10), int(x_10), int(y_5), 400).wait()
+                else:
+                    context.tasker.controller.post_swipe(900, 600, 900, 200, 400).wait()
+                time.sleep(1.5)
+                
+            if not target_found:
+                log_debug("[enhance_equipment_action] Could not find the target equipment in the list.")
+                return False
+                
+            # --- The Refining Loop ---
+            skip_buxianshi = False
+            
+            while True:
+                log_debug("[enhance_equipment_action] Looking for liancheng.png")
+                liancheng_tpl = cv2.imread(rf"{img_dir}\liancheng.png")
+                clicked_liancheng = False
+                for _ in range(5):
+                    image = context.tasker.controller.post_screencap().wait().get()
+                    if liancheng_tpl is not None:
+                        res = cv2.matchTemplate(image, liancheng_tpl, cv2.TM_CCOEFF_NORMED)
+                        _, max_val, _, max_loc = cv2.minMaxLoc(res)
+                        if max_val >= 0.8:
+                            cx = max_loc[0] + liancheng_tpl.shape[1] // 2
+                            cy = max_loc[1] + liancheng_tpl.shape[0] // 2
+                            context.tasker.controller.post_click(cx, cy).wait()
+                            clicked_liancheng = True
+                            break
+                    time.sleep(1)
+                    
+                if not clicked_liancheng:
+                    log_debug("[enhance_equipment_action] Could not find liancheng.png")
+                    break
+                
+                # Check for confirm_first.png
+                log_debug("[enhance_equipment_action] Looking for confirm_first.png")
+                confirm_first_tpl = cv2.imread(rf"{img_dir}\confirm_first.png")
+                for _ in range(5):
+                    image = context.tasker.controller.post_screencap().wait().get()
+                    if confirm_first_tpl is not None:
+                        res = cv2.matchTemplate(image, confirm_first_tpl, cv2.TM_CCOEFF_NORMED)
+                        _, max_val, _, max_loc = cv2.minMaxLoc(res)
+                        if max_val >= 0.8:
+                            cx = max_loc[0] + confirm_first_tpl.shape[1] // 2
+                            cy = max_loc[1] + confirm_first_tpl.shape[0] // 2
+                            context.tasker.controller.post_click(cx, cy).wait()
+                            break
+                    time.sleep(1)
+                
+                log_debug("[enhance_equipment_action] Waiting for result indication...")
+                resultind_tpl = cv2.imread(rf"{img_dir}\resultindication.png")
+                found_result = False
+                for _ in range(15):
+                    time.sleep(1)
+                    image = context.tasker.controller.post_screencap().wait().get()
+                    if resultind_tpl is not None:
+                        res = cv2.matchTemplate(image, resultind_tpl, cv2.TM_CCOEFF_NORMED)
+                        _, max_val, _, _ = cv2.minMaxLoc(res)
+                        if max_val >= 0.8:
+                            found_result = True
+                            break
+                        
+                if not found_result:
+                    log_debug("[enhance_equipment_action] resultindication.png not found")
+                    break
+                
+                time.sleep(1)
+                image = context.tasker.controller.post_screencap().wait().get()
+                current_stats = scan_sub_stats(context, image, 65, 517)
+                incoming_stats = scan_sub_stats(context, image, 711, 517)
+                
+                def get_total_pen(stats_list):
+                    tot = 0
+                    for stat_dict in stats_list:
+                        for key, val in stat_dict.items():
+                            if key in ["物理防御贯穿", "魔法防御贯穿"]:
+                                try:
+                                    num_str = re.sub(r"\D", "", str(val))
+                                    if num_str: tot += int(num_str)
+                                except ValueError:
+                                    pass
+                    return tot
+                    
+                cur_pen = get_total_pen(current_stats)
+                inc_pen = get_total_pen(incoming_stats)
+                
+                log_debug(f"[enhance_equipment_action] Current Pen: {cur_pen}, Incoming Pen: {inc_pen}")
+                
+                if inc_pen > cur_pen:
+                    log_debug("[enhance_equipment_action] Incoming is better. Clicking confirm.")
+                    btn_tpl = cv2.imread(rf"{img_dir}\confirm.png")
+                else:
+                    log_debug("[enhance_equipment_action] Incoming is not better. Clicking revert.")
+                    btn_tpl = cv2.imread(rf"{img_dir}\revert.png")
+                    
+                if btn_tpl is not None:
+                    res = cv2.matchTemplate(image, btn_tpl, cv2.TM_CCOEFF_NORMED)
+                    _, max_val, _, max_loc = cv2.minMaxLoc(res)
+                    if max_val >= 0.8:
+                        cx = max_loc[0] + btn_tpl.shape[1] // 2
+                        cy = max_loc[1] + btn_tpl.shape[0] // 2
+                        context.tasker.controller.post_click(cx, cy).wait()
+                    else:
+                        log_debug("[enhance_equipment_action] Confirm/Revert button not found!")
+                else:
+                    log_debug("[enhance_equipment_action] Confirm/Revert template image missing!")
+                    
+                time.sleep(1.5)
+                
+                if not skip_buxianshi:
+                    image = context.tasker.controller.post_screencap().wait().get()
+                    buxianshi_tpl = cv2.imread(rf"{img_dir}\buxianshi.png")
+                    checkbox_tpl = cv2.imread(rf"{img_dir}\checkbox.png")
+                    
+                    override = { "OcrTask": { "recognition": "OCR", "expected": "不显示今后的消息" } }
+                    reco_detail = context.run_recognition("OcrTask", image, pipeline_override=override)
+                    
+                    max_val_bx = 0
+                    if buxianshi_tpl is not None:
+                        res_bx = cv2.matchTemplate(image, buxianshi_tpl, cv2.TM_CCOEFF_NORMED)
+                        _, max_val_bx, _, _ = cv2.minMaxLoc(res_bx)
+                    
+                    if (reco_detail and reco_detail.hit) or max_val_bx >= 0.8:
+                        log_debug("[enhance_equipment_action] Handling 'Do not show again' dialog.")
+                        if checkbox_tpl is not None:
+                            res_cb = cv2.matchTemplate(image, checkbox_tpl, cv2.TM_CCOEFF_NORMED)
+                            _, max_val_cb, _, max_loc_cb = cv2.minMaxLoc(res_cb)
+                            if max_val_cb >= 0.8:
+                                context.tasker.controller.post_click(max_loc_cb[0] + 10, max_loc_cb[1] + 10).wait()
+                                time.sleep(0.5)
+                            
+                        override_conf = { "OcrTask": { "recognition": "OCR", "expected": "确认" } }
+                        reco_conf = context.run_recognition("OcrTask", image, pipeline_override=override_conf)
+                        if reco_conf and reco_conf.hit:
+                            box = reco_conf.box
+                            context.tasker.controller.post_click(box[0] + box[2]//2, box[1] + box[3]//2).wait()
+                            time.sleep(1)
+                    
+                    # We only need to check it once. Subsequent loops don't need this check.
+                    skip_buxianshi = True
+                
+                time.sleep(1)
+                image = context.tasker.controller.post_screencap().wait().get()
+                panel_stats = scan_sub_stats(context, image, 30, 310)
+                
+                lockoff_tpl = cv2.imread(rf"{img_dir}\lockoff.png")
+                
+                has_pen_stats = False
+                all_maxed = True
+                
+                stat_rois_vals = [
+                    [240, 310, 55, 35], [480, 310, 80, 35],
+                    [240, 348, 55, 35], [480, 348, 80, 35]
+                ]
+                
+                for idx, stat_dict in enumerate(panel_stats):
+                    for key, val in stat_dict.items():
+                        if key in ["物理防御贯穿", "魔法防御贯穿"]:
+                            has_pen_stats = True
+                            try:
+                                num_str = re.sub(r"\D", "", str(val))
+                                if num_str:
+                                    val_int = int(num_str)
+                                    if val_int == 3:
+                                        if lockoff_tpl is not None and idx < len(stat_rois_vals):
+                                            vx, vy, vw, vh = stat_rois_vals[idx]
+                                            search_x = max(0, vx - 50)
+                                            search_y = max(0, vy - 10)
+                                            search_w = 60
+                                            search_h = vh + 20
+                                            
+                                            crop_area = image[search_y:search_y+search_h, search_x:search_x+search_w]
+                                            res_lo = cv2.matchTemplate(crop_area, lockoff_tpl, cv2.TM_CCOEFF_NORMED)
+                                            _, max_val_lo, _, max_loc_lo = cv2.minMaxLoc(res_lo)
+                                            
+                                            if max_val_lo >= 0.8:
+                                                lx = search_x + max_loc_lo[0] + lockoff_tpl.shape[1] // 2
+                                                ly = search_y + max_loc_lo[1] + lockoff_tpl.shape[0] // 2
+                                                context.tasker.controller.post_click(lx, ly).wait()
+                                                time.sleep(0.5)
+                                    else:
+                                        all_maxed = False
+                                else:
+                                    all_maxed = False
+                            except ValueError:
+                                all_maxed = False
+                                
+                if not has_pen_stats or all_maxed:
+                    log_debug("[enhance_equipment_action] All penetration stats are maxed at 3! Refine complete.")
+                    break
                 
             return True
             
