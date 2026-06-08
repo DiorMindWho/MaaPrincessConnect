@@ -5,9 +5,12 @@ import json
 import re
 from maa.agent.agent_server import AgentServer
 from maa.custom_recognition import CustomRecognition
+from maa.custom_action import CustomAction
 from maa.context import Context
 import os
 import datetime
+
+global_recorded_equipments = []
 
 LOG_FILE = r"D:\word\MaaFramework\MaaPrincessConnect\install\debug\equipment_log.txt"
 
@@ -42,6 +45,8 @@ class CheckEquipmentReco(CustomRecognition):
         
             # Dictionary to store recorded items to avoid printing duplicates across scrolls
             recorded_equipments = {}
+            global global_recorded_equipments
+            global_recorded_equipments.clear()
         
             # On the first page, we start from the 1st equipment. 
             # On subsequent pages, we skip the first 5 because they were the bottom row of the previous page.
@@ -220,6 +225,10 @@ class CheckEquipmentReco(CustomRecognition):
                     equip_key = f"{equip_name}_{'-'.join(str(s) for s in sub_stats)}"
                     if equip_key not in recorded_equipments:
                         recorded_equipments[equip_key] = True
+                        global_recorded_equipments.append({
+                            "name": equip_name,
+                            "stats": sub_stats
+                        })
                         processed_count += 1
                         log_debug(f"[{processed_count}] Name: {equip_name}")
                         log_debug(f"    Stats: {sub_stats}")
@@ -242,12 +251,61 @@ class CheckEquipmentReco(CustomRecognition):
             
             log_debug(f"[check_equipment_reco] Finished all equipment. Total processed: {processed_count}")
             
-            # Once we are done recording, proceed to StopTask
-            context.override_next(argv.node_name, ["StopTask"])
-            return CustomRecognition.AnalyzeResult(box=(0,0,0,0), detail="Recorded all equipment")
+            # Once we are done recording, proceed to EnhanceEquipment
+            context.override_next(argv.node_name, ["EnhanceEquipment"])
+            return CustomRecognition.AnalyzeResult(box=(0,0,1,1), detail="Recorded all equipment")
             
         except Exception as e:
             import traceback
             log_debug(f"[check_equipment_reco] CRASHED WITH EXCEPTION: {e}")
             log_debug(traceback.format_exc())
             return CustomRecognition.AnalyzeResult(box=(0,0,0,0), detail="Crashed")
+
+@AgentServer.custom_action("enhance_equipment_action")
+class EnhanceEquipmentAction(CustomAction):
+    def run(self, context: Context, argv: CustomAction.RunArg) -> bool:
+        try:
+            log_debug("="*50)
+            log_debug("[enhance_equipment_action] Analyzing equipment to enhance...")
+            
+            global global_recorded_equipments
+            
+            lowest_val = float('inf')
+            lowest_equip = None
+            
+            for equip in global_recorded_equipments:
+                stats = equip.get("stats", [])
+                
+                # sum up 物理防御贯穿 or 魔法防御贯穿
+                total_penetration = 0
+                
+                for stat_dict in stats:
+                    for key, val in stat_dict.items():
+                        if key in ["物理防御贯穿", "魔法防御贯穿"]:
+                            try:
+                                # Extract digits in case of "???" or other symbols
+                                num_str = re.sub(r"\D", "", str(val))
+                                if num_str:
+                                    total_penetration += int(num_str)
+                            except ValueError:
+                                pass
+                
+                if total_penetration < lowest_val:
+                    lowest_val = total_penetration
+                    lowest_equip = equip
+            
+            if lowest_equip:
+                log_debug(f"[enhance_equipment_action] Lowest penetration equipment to enhance:")
+                log_debug(f"    Name: {lowest_equip['name']}")
+                log_debug(f"    Stats: {lowest_equip['stats']}")
+                log_debug(f"    Total Penetration: {lowest_val}")
+            else:
+                log_debug("[enhance_equipment_action] No equipment with 物理防御贯穿 or 魔法防御贯穿 found.")
+                
+            return True
+            
+        except Exception as e:
+            import traceback
+            log_debug(f"[enhance_equipment_action] CRASHED WITH EXCEPTION: {e}")
+            log_debug(traceback.format_exc())
+            return False
