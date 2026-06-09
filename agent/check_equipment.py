@@ -457,24 +457,35 @@ class EnhanceEquipmentAction(CustomAction):
                 current_stats = scan_sub_stats(context, image, 65, 517)
                 incoming_stats = scan_sub_stats(context, image, 711, 517)
                 
-                def get_total_pen(stats_list):
+                def get_pen_stats(stats_list):
                     tot = 0
+                    vals = []
                     for stat_dict in stats_list:
                         for key, val in stat_dict.items():
                             if key in ["物理防御贯穿", "魔法防御贯穿"]:
                                 try:
                                     num_str = re.sub(r"\D", "", str(val))
-                                    if num_str: tot += int(num_str)
+                                    if num_str: 
+                                        v = int(num_str)
+                                        tot += v
+                                        vals.append(v)
                                 except ValueError:
                                     pass
-                    return tot
+                    vals.sort(reverse=True)
+                    return tot, vals
                     
-                cur_pen = get_total_pen(current_stats)
-                inc_pen = get_total_pen(incoming_stats)
+                cur_pen, cur_vals = get_pen_stats(current_stats)
+                inc_pen, inc_vals = get_pen_stats(incoming_stats)
                 
-                log_debug(f"[enhance_equipment_action] Current Pen: {cur_pen}, Incoming Pen: {inc_pen}")
+                log_debug(f"[enhance_equipment_action] Current Pen: {cur_pen} (Vals: {cur_vals}), Incoming Pen: {inc_pen} (Vals: {inc_vals})")
                 
+                keep_incoming = False
                 if inc_pen > cur_pen:
+                    keep_incoming = True
+                elif inc_pen == cur_pen and inc_vals > cur_vals:
+                    keep_incoming = True
+                
+                if keep_incoming:
                     log_debug("[enhance_equipment_action] Incoming is better. Clicking confirm.")
                     btn_tpl = cv2.imread(rf"{img_dir}\confirm.png")
                 else:
@@ -533,8 +544,8 @@ class EnhanceEquipmentAction(CustomAction):
                 
                 lockoff_tpl = cv2.imread(rf"{img_dir}\lockoff.png")
                 
-                has_pen_stats = False
-                all_maxed = True
+                maxed_pen_count = 0
+                total_pen_count = 0
                 
                 stat_rois_vals = [
                     [240, 310, 55, 35], [480, 310, 80, 35],
@@ -544,12 +555,13 @@ class EnhanceEquipmentAction(CustomAction):
                 for idx, stat_dict in enumerate(panel_stats):
                     for key, val in stat_dict.items():
                         if key in ["物理防御贯穿", "魔法防御贯穿"]:
-                            has_pen_stats = True
+                            total_pen_count += 1
                             try:
                                 num_str = re.sub(r"\D", "", str(val))
                                 if num_str:
                                     val_int = int(num_str)
                                     if val_int == 3:
+                                        maxed_pen_count += 1
                                         if lockoff_tpl is not None and idx < len(stat_rois_vals):
                                             vx, vy, vw, vh = stat_rois_vals[idx]
                                             search_x = max(0, vx - 50)
@@ -566,15 +578,11 @@ class EnhanceEquipmentAction(CustomAction):
                                                 ly = search_y + max_loc_lo[1] + lockoff_tpl.shape[0] // 2
                                                 context.tasker.controller.post_click(lx, ly).wait()
                                                 time.sleep(0.5)
-                                    else:
-                                        all_maxed = False
-                                else:
-                                    all_maxed = False
                             except ValueError:
-                                all_maxed = False
+                                pass
                                 
-                if not has_pen_stats or all_maxed:
-                    log_debug("[enhance_equipment_action] All penetration stats are maxed at 3! Refine complete.")
+                if maxed_pen_count == 4 or (maxed_pen_count == 3 and total_pen_count == 4):
+                    log_debug(f"[enhance_equipment_action] Stop condition met! Maxed: {maxed_pen_count}, Total Pen Stats: {total_pen_count}. Refine complete.")
                     break
                 
             return True
