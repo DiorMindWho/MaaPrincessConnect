@@ -3,8 +3,8 @@ import numpy as np
 
 def test_match():
     # Load images
-    screenshot_path = 'install/debug/on_error/2026.06.07-12.27.50.123_Wait_GearSelect_Loop.png'
-    template_path = 'assets/resource/image/gearselect.png'
+    screenshot_path = 'assets/resource/image/screenshot.png'
+    template_path = 'assets/resource/image/lockoff.png'
     
     img = cv2.imread(screenshot_path)
     tmpl = cv2.imread(template_path)
