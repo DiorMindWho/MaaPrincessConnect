@@ -564,10 +564,13 @@ class EnhanceEquipmentAction(CustomAction):
                                         maxed_pen_count += 1
                                         if lockoff_tpl is not None and idx < len(stat_rois_vals):
                                             vx, vy, vw, vh = stat_rois_vals[idx]
-                                            search_x = max(0, vx - 50)
-                                            search_y = max(0, vy - 10)
-                                            search_w = 60
-                                            search_h = vh + 20
+                                            
+                                            # Expand the search area to catch the lock icon correctly
+                                            # The lock icon is around 80px to the left of the value (e.g. x=160 when value is x=240)
+                                            search_x = max(0, vx - 100)
+                                            search_y = max(0, vy - 20)
+                                            search_w = 120
+                                            search_h = vh + 40
                                             
                                             crop_area = image[search_y:search_y+search_h, search_x:search_x+search_w]
                                             res_lo = cv2.matchTemplate(crop_area, lockoff_tpl, cv2.TM_CCOEFF_NORMED)
