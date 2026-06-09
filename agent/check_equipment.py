@@ -109,6 +109,10 @@ class CheckEquipmentReco(CustomRecognition):
             start_idx = 0
             
             while True:
+                if context.tasker.stopping:
+                    log_debug("[check_equipment_reco] Task stopped by user.")
+                    return CustomRecognition.AnalyzeResult(box=(0,0,0,0), detail="Stopped")
+                    
                 # 1. Take fresh screenshot
                 image_future = context.tasker.controller.post_screencap().wait()
                 image = image_future.get()
@@ -321,6 +325,10 @@ class EnhanceEquipmentAction(CustomAction):
             last_grid_img = None
             
             while not target_found:
+                if context.tasker.stopping:
+                    log_debug("[enhance_equipment_action] Task stopped by user.")
+                    return False
+                    
                 image_future = context.tasker.controller.post_screencap().wait()
                 image = image_future.get()
                 if image is None:
@@ -400,6 +408,10 @@ class EnhanceEquipmentAction(CustomAction):
             skip_buxianshi = False
             
             while True:
+                if context.tasker.stopping:
+                    log_debug("[enhance_equipment_action] Task stopped by user during refine.")
+                    return False
+                    
                 log_debug("[enhance_equipment_action] Looking for liancheng.png")
                 liancheng_tpl = cv2.imread(rf"{img_dir}\liancheng.png")
                 clicked_liancheng = False
