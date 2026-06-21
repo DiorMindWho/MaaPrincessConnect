@@ -162,6 +162,7 @@ def check_and_lock_max_stats(context: Context, img_dir: str) -> bool:
     time.sleep(1)
     image = context.tasker.controller.post_screencap().wait().get()
     panel_stats = scan_sub_stats(context, image, 30, 310)
+    log_debug(f"[check_and_lock_max_stats] Raw panel stats: {panel_stats}")
     
     lockoff_tpl = cv2.imread(rf"{img_dir}\lockoff.png")
     maxed_pen_count = 0
