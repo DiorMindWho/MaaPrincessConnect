@@ -28,12 +28,12 @@ def scan_sub_stats(context: Context, image: np.ndarray, base_x: int, base_y: int
     stat_rois = [
         # Row 1
         {"type": "name", "roi": [0, 0, 200, 35]},
-        {"type": "val",  "roi": [210, 0, 55, 35]},
+        {"type": "val",  "roi": [210, 0, 46, 35]},
         {"type": "name", "roi": [265, 0, 185, 35]},
         {"type": "val",  "roi": [450, 0, 80, 35]},
         # Row 2
         {"type": "name", "roi": [0, 38, 200, 35]},
-        {"type": "val",  "roi": [210, 38, 55, 35]},
+        {"type": "val",  "roi": [210, 38, 46, 35]},
         {"type": "name", "roi": [265, 38, 185, 35]},
         {"type": "val",  "roi": [450, 38, 80, 35]},
     ]
@@ -72,10 +72,55 @@ def scan_sub_stats(context: Context, image: np.ndarray, base_x: int, base_y: int
         else:
             if current_key:
                 val_clean = text_str.replace(" ", "")
+                if "贯穿" in current_key:
+                    if val_clean not in ["1", "2", "3"]:
+                        val_clean = ""
+                        
+                    retry_count = 0
+                    while not val_clean and retry_count < 3:
+                        log_debug(f"[scan_sub_stats] Retrying OCR for {current_key} value. Attempt {retry_count + 1}")
+                        time.sleep(0.5)
+                        new_image = context.tasker.controller.post_screencap().wait().get()
+                        if new_image is not None:
+                            crop_img = new_image[y:y+h, x:x+w]
+                            
+                            # --- Image Pre-processing to improve single-digit OCR ---
+                            # Convert to grayscale
+                            gray = cv2.cvtColor(crop_img, cv2.COLOR_BGR2GRAY)
+                            
+                            # Threshold: green text is darker, yellow background is lighter.
+                            # This makes text white (255) and background black (0).
+                            _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY_INV)
+                            
+                            # Pad with a black border to provide clear context
+                            padded = cv2.copyMakeBorder(thresh, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=0)
+                            
+                            # Enlarge the image significantly
+                            scaled = cv2.resize(padded, (0, 0), fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+                            
+                            # Convert back to BGR so MaaFramework OCR doesn't crash on 1-channel images
+                            scaled_bgr = cv2.cvtColor(scaled, cv2.COLOR_GRAY2BGR)
+                            
+                            new_reco = context.run_recognition("OcrTask", scaled_bgr, pipeline_override=crop_override)
+                            if new_reco and new_reco.hit:
+                                temp_val = "".join([t.get("text", "") for t in new_reco.raw_detail.get("all", [])]).strip().replace(" ", "")
+                                if temp_val in ["1", "2", "3"]:
+                                    val_clean = temp_val
+                        retry_count += 1
+                        
                 if val_clean:
                     sub_stats.append({current_key: val_clean})
                 else:
                     sub_stats.append({current_key: "???"})
+                    try:
+                        debug_dir = r"D:\word\MaaFramework\MaaPrincessConnect\install\debug"
+                        os.makedirs(debug_dir, exist_ok=True)
+                        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        safe_key = "".join(x for x in current_key if x.isalnum())
+                        cv2.imwrite(rf"{debug_dir}\failed_ocr_{safe_key}_{ts}.png", crop_img)
+                        log_debug(f"[scan_sub_stats] Saved failed crop image to failed_ocr_{safe_key}_{ts}.png")
+                    except Exception as e:
+                        log_debug(f"[scan_sub_stats] Failed to save crop image: {e}")
                 current_key = None
                 
     return sub_stats
@@ -112,6 +157,53 @@ def handle_buxianshi_dialog(context: Context, img_dir: str):
             box = reco_conf.box
             context.tasker.controller.post_click(box[0] + box[2]//2, box[1] + box[3]//2).wait()
             time.sleep(1)
+
+def check_and_lock_max_stats(context: Context, img_dir: str) -> bool:
+    time.sleep(1)
+    image = context.tasker.controller.post_screencap().wait().get()
+    panel_stats = scan_sub_stats(context, image, 30, 310)
+    
+    lockoff_tpl = cv2.imread(rf"{img_dir}\lockoff.png")
+    maxed_pen_count = 0
+    total_pen_count = 0
+    stat_rois_vals = [
+        [240, 310, 55, 35], [480, 310, 80, 35],
+        [240, 348, 55, 35], [480, 348, 80, 35]
+    ]
+    
+    for idx, stat_dict in enumerate(panel_stats):
+        for key, val in stat_dict.items():
+            if "贯穿" in key:
+                total_pen_count += 1
+                try:
+                    num_str = re.sub(r"\D", "", str(val))
+                    if num_str:
+                        val_int = int(num_str)
+                        if val_int == 3:
+                            maxed_pen_count += 1
+                            if lockoff_tpl is not None and idx < len(stat_rois_vals):
+                                vx, vy, vw, vh = stat_rois_vals[idx]
+                                search_x = max(0, vx - 100)
+                                search_y = max(0, vy - 20)
+                                search_w = 120
+                                search_h = vh + 40
+                                
+                                crop_area = image[search_y:search_y+search_h, search_x:search_x+search_w]
+                                res_lo = cv2.matchTemplate(crop_area, lockoff_tpl, cv2.TM_CCOEFF_NORMED)
+                                _, max_val_lo, _, max_loc_lo = cv2.minMaxLoc(res_lo)
+                                
+                                if max_val_lo >= 0.8:
+                                    lx = search_x + max_loc_lo[0] + lockoff_tpl.shape[1] // 2
+                                    ly = search_y + max_loc_lo[1] + lockoff_tpl.shape[0] // 2
+                                    context.tasker.controller.post_click(lx, ly).wait()
+                                    time.sleep(0.5)
+                except ValueError:
+                    pass
+                    
+    if maxed_pen_count == 4 or (maxed_pen_count == 3 and total_pen_count == 4):
+        log_debug(f"[enhance_equipment_action] Stop condition met! Maxed: {maxed_pen_count}, Total Pen Stats: {total_pen_count}. Refine complete.")
+        return True
+    return False
 
 @AgentServer.custom_recognition("check_equipment_reco")
 class CheckEquipmentReco(CustomRecognition):
@@ -317,7 +409,7 @@ class EnhanceEquipmentAction(CustomAction):
                 
                 for stat_dict in stats:
                     for key, val in stat_dict.items():
-                        if key in ["物理防御贯穿", "魔法防御贯穿"]:
+                        if "贯穿" in key:
                             try:
                                 # Extract digits in case of "???" or other symbols
                                 num_str = re.sub(r"\D", "", str(val))
@@ -513,14 +605,23 @@ class RefineEquipmentAction(CustomAction):
                 image = context.tasker.controller.post_screencap().wait().get()
                 current_stats = scan_sub_stats(context, image, 65, 517)
                 incoming_stats = scan_sub_stats(context, image, 711, 517)
-                log_debug(f"[enhance_equipment_action] Raw stats -> Current: {current_stats} | Incoming: {incoming_stats}")
+                
+                # --- Remove locked stats (penetration 3) to prevent OCR errors ---
+                for i in range(min(len(current_stats), len(incoming_stats)) - 1, -1, -1):
+                    for key, val in current_stats[i].items():
+                        if "贯穿" in key and val == "3":
+                            current_stats.pop(i)
+                            incoming_stats.pop(i)
+                            break
+                            
+                log_debug(f"[enhance_equipment_action] Filtered stats -> Current: {current_stats} | Incoming: {incoming_stats}")
                 
                 def get_pen_stats(stats_list):
                     tot = 0
                     vals = []
                     for stat_dict in stats_list:
                         for key, val in stat_dict.items():
-                            if key in ["物理防御贯穿", "魔法防御贯穿"]:
+                            if "贯穿" in key:
                                 try:
                                     num_str = re.sub(r"\D", "", str(val))
                                     if num_str: 
@@ -566,55 +667,9 @@ class RefineEquipmentAction(CustomAction):
                 
                 handle_buxianshi_dialog(context, img_dir)
                 
-                time.sleep(1)
-                image = context.tasker.controller.post_screencap().wait().get()
-                panel_stats = scan_sub_stats(context, image, 30, 310)
-                
-                lockoff_tpl = cv2.imread(rf"{img_dir}\lockoff.png")
-                
-                maxed_pen_count = 0
-                total_pen_count = 0
-                
-                stat_rois_vals = [
-                    [240, 310, 55, 35], [480, 310, 80, 35],
-                    [240, 348, 55, 35], [480, 348, 80, 35]
-                ]
-                
-                for idx, stat_dict in enumerate(panel_stats):
-                    for key, val in stat_dict.items():
-                        if key in ["物理防御贯穿", "魔法防御贯穿"]:
-                            total_pen_count += 1
-                            try:
-                                num_str = re.sub(r"\D", "", str(val))
-                                if num_str:
-                                    val_int = int(num_str)
-                                    if val_int == 3:
-                                        maxed_pen_count += 1
-                                        if lockoff_tpl is not None and idx < len(stat_rois_vals):
-                                            vx, vy, vw, vh = stat_rois_vals[idx]
-                                            
-                                            # Expand the search area to catch the lock icon correctly
-                                            # The lock icon is around 80px to the left of the value (e.g. x=160 when value is x=240)
-                                            search_x = max(0, vx - 100)
-                                            search_y = max(0, vy - 20)
-                                            search_w = 120
-                                            search_h = vh + 40
-                                            
-                                            crop_area = image[search_y:search_y+search_h, search_x:search_x+search_w]
-                                            res_lo = cv2.matchTemplate(crop_area, lockoff_tpl, cv2.TM_CCOEFF_NORMED)
-                                            _, max_val_lo, _, max_loc_lo = cv2.minMaxLoc(res_lo)
-                                            
-                                            if max_val_lo >= 0.8:
-                                                lx = search_x + max_loc_lo[0] + lockoff_tpl.shape[1] // 2
-                                                ly = search_y + max_loc_lo[1] + lockoff_tpl.shape[0] // 2
-                                                context.tasker.controller.post_click(lx, ly).wait()
-                                                time.sleep(0.5)
-                            except ValueError:
-                                pass
-                                
-                if maxed_pen_count == 4 or (maxed_pen_count == 3 and total_pen_count == 4):
-                    log_debug(f"[enhance_equipment_action] Stop condition met! Maxed: {maxed_pen_count}, Total Pen Stats: {total_pen_count}. Refine complete.")
-                    break
+                if keep_incoming:
+                    if check_and_lock_max_stats(context, img_dir):
+                        break
                 
             return True
             
