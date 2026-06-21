@@ -80,6 +80,39 @@ def scan_sub_stats(context: Context, image: np.ndarray, base_x: int, base_y: int
                 
     return sub_stats
 
+def handle_buxianshi_dialog(context: Context, img_dir: str):
+    image = context.tasker.controller.post_screencap().wait().get()
+    if image is None:
+        log_debug("[handle_buxianshi_dialog] Screenshot failed, skipping dialog check.")
+        return
+
+    buxianshi_tpl = cv2.imread(rf"{img_dir}\buxianshi.png")
+    checkbox_tpl = cv2.imread(rf"{img_dir}\checkbox.png")
+    
+    override = { "OcrTask": { "recognition": "OCR", "expected": "不显示今后的消息" } }
+    reco_detail = context.run_recognition("OcrTask", image, pipeline_override=override)
+    
+    max_val_bx = 0
+    if buxianshi_tpl is not None:
+        res_bx = cv2.matchTemplate(image, buxianshi_tpl, cv2.TM_CCOEFF_NORMED)
+        _, max_val_bx, _, _ = cv2.minMaxLoc(res_bx)
+    
+    if (reco_detail and reco_detail.hit) or max_val_bx >= 0.8:
+        log_debug("[handle_buxianshi_dialog] Handling 'Do not show again' dialog.")
+        if checkbox_tpl is not None:
+            res_cb = cv2.matchTemplate(image, checkbox_tpl, cv2.TM_CCOEFF_NORMED)
+            _, max_val_cb, _, max_loc_cb = cv2.minMaxLoc(res_cb)
+            if max_val_cb >= 0.8:
+                context.tasker.controller.post_click(max_loc_cb[0] + 10, max_loc_cb[1] + 10).wait()
+                time.sleep(0.5)
+            
+        override_conf = { "OcrTask": { "recognition": "OCR", "expected": "确认", "roi": [650, 600, 260, 70] } }
+        reco_conf = context.run_recognition("OcrTask", image, pipeline_override=override_conf)
+        if reco_conf and reco_conf.hit:
+            box = reco_conf.box
+            context.tasker.controller.post_click(box[0] + box[2]//2, box[1] + box[3]//2).wait()
+            time.sleep(1)
+
 @AgentServer.custom_recognition("check_equipment_reco")
 class CheckEquipmentReco(CustomRecognition):
     def analyze(self, context: Context, argv: CustomRecognition.AnalyzeArg) -> CustomRecognition.AnalyzeResult:
@@ -421,14 +454,12 @@ class RefineEquipmentAction(CustomAction):
             img_dir = r"D:\word\MaaFramework\MaaPrincessConnect\assets\resource\image"
             
             # --- The Refining Loop ---
-            skip_buxianshi = False
             
             while True:
                 if context.tasker.stopping:
                     log_debug("[enhance_equipment_action] Task stopped by user during refine.")
                     return False
                     
-                log_debug("[enhance_equipment_action] Looking for liancheng.png")
                 liancheng_tpl = cv2.imread(rf"{img_dir}\liancheng.png")
                 clicked_liancheng = False
                 for _ in range(5):
@@ -449,7 +480,6 @@ class RefineEquipmentAction(CustomAction):
                     break
                 
                 # Check for confirm_first.png
-                log_debug("[enhance_equipment_action] Looking for confirm_first.png")
                 confirm_first_tpl = cv2.imread(rf"{img_dir}\confirm_first.png")
                 for _ in range(5):
                     image = context.tasker.controller.post_screencap().wait().get()
@@ -463,7 +493,6 @@ class RefineEquipmentAction(CustomAction):
                             break
                     time.sleep(1)
                 
-                log_debug("[enhance_equipment_action] Waiting for result indication...")
                 resultind_tpl = cv2.imread(rf"{img_dir}\resultindication.png")
                 found_result = False
                 for _ in range(15):
@@ -484,6 +513,7 @@ class RefineEquipmentAction(CustomAction):
                 image = context.tasker.controller.post_screencap().wait().get()
                 current_stats = scan_sub_stats(context, image, 65, 517)
                 incoming_stats = scan_sub_stats(context, image, 711, 517)
+                log_debug(f"[enhance_equipment_action] Raw stats -> Current: {current_stats} | Incoming: {incoming_stats}")
                 
                 def get_pen_stats(stats_list):
                     tot = 0
@@ -534,37 +564,7 @@ class RefineEquipmentAction(CustomAction):
                     
                 time.sleep(1.5)
                 
-                if not skip_buxianshi:
-                    image = context.tasker.controller.post_screencap().wait().get()
-                    buxianshi_tpl = cv2.imread(rf"{img_dir}\buxianshi.png")
-                    checkbox_tpl = cv2.imread(rf"{img_dir}\checkbox.png")
-                    
-                    override = { "OcrTask": { "recognition": "OCR", "expected": "不显示今后的消息" } }
-                    reco_detail = context.run_recognition("OcrTask", image, pipeline_override=override)
-                    
-                    max_val_bx = 0
-                    if buxianshi_tpl is not None:
-                        res_bx = cv2.matchTemplate(image, buxianshi_tpl, cv2.TM_CCOEFF_NORMED)
-                        _, max_val_bx, _, _ = cv2.minMaxLoc(res_bx)
-                    
-                    if (reco_detail and reco_detail.hit) or max_val_bx >= 0.8:
-                        log_debug("[enhance_equipment_action] Handling 'Do not show again' dialog.")
-                        if checkbox_tpl is not None:
-                            res_cb = cv2.matchTemplate(image, checkbox_tpl, cv2.TM_CCOEFF_NORMED)
-                            _, max_val_cb, _, max_loc_cb = cv2.minMaxLoc(res_cb)
-                            if max_val_cb >= 0.8:
-                                context.tasker.controller.post_click(max_loc_cb[0] + 10, max_loc_cb[1] + 10).wait()
-                                time.sleep(0.5)
-                            
-                        override_conf = { "OcrTask": { "recognition": "OCR", "expected": "确认" } }
-                        reco_conf = context.run_recognition("OcrTask", image, pipeline_override=override_conf)
-                        if reco_conf and reco_conf.hit:
-                            box = reco_conf.box
-                            context.tasker.controller.post_click(box[0] + box[2]//2, box[1] + box[3]//2).wait()
-                            time.sleep(1)
-                    
-                    # We only need to check it once. Subsequent loops don't need this check.
-                    skip_buxianshi = True
+                handle_buxianshi_dialog(context, img_dir)
                 
                 time.sleep(1)
                 image = context.tasker.controller.post_screencap().wait().get()
