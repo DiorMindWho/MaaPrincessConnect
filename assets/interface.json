@@ -42,23 +42,16 @@
     },
     "task": [
         {
-            "name": "连接测试",
-            "label": "连接测试",
-            "entry": "MyTask1",
-            "default_check": true,
-            "description": "验证雷电模拟器连接与 Pipeline 基础流程。请在 pipeline 中完善 MyTask1 节点。"
-        },
-        {
             "name": "究极炼成",
             "label": "究极炼成",
             "entry": "究极炼成",
             "description": "自动刷取并选择未满属性的装备"
         },
         {
-            "name": "Agent 示例",
-            "label": "Agent 示例",
-            "entry": "MyTask4",
-            "description": "测试 Custom 识别（my_reco_222）与动作（my_action_111），需 Agent 子进程正常运行。"
+            "name": "究极炼成（当前）",
+            "label": "究极炼成（当前）",
+            "entry": "RefineEquipment",
+            "description": "从强化界面开始，默认已经选择好装备"
         }
     ],
     "option": {}

@@ -158,6 +158,13 @@
         "action": "Custom",
         "custom_action": "enhance_equipment_action",
         "next": [
+            "RefineEquipment"
+        ]
+    },
+    "RefineEquipment": {
+        "action": "Custom",
+        "custom_action": "refine_equipment_action",
+        "next": [
             "StopTask"
         ]
     },

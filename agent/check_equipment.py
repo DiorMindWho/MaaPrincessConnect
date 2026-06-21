@@ -404,6 +404,22 @@ class EnhanceEquipmentAction(CustomAction):
                 log_debug("[enhance_equipment_action] Could not find the target equipment in the list.")
                 return False
                 
+            return True
+            
+        except Exception as e:
+            import traceback
+            log_debug(f"[enhance_equipment_action] CRASHED WITH EXCEPTION: {e}")
+            log_debug(traceback.format_exc())
+            return False
+
+@AgentServer.custom_action("refine_equipment_action")
+class RefineEquipmentAction(CustomAction):
+    def run(self, context: Context, argv: CustomAction.RunArg) -> bool:
+        try:
+            log_debug("="*50)
+            log_debug("[refine_equipment_action] Starting refining loop...")
+            img_dir = r"D:\word\MaaFramework\MaaPrincessConnect\assets\resource\image"
+            
             # --- The Refining Loop ---
             skip_buxianshi = False
             
