@@ -30,12 +30,12 @@ def scan_sub_stats(context: Context, image: np.ndarray, base_x: int, base_y: int
         {"type": "name", "roi": [0, 0, 185, 35]},
         {"type": "val",  "roi": [185, 0, 46, 35]},
         {"type": "name", "roi": [265, 0, 185, 35]},
-        {"type": "val",  "roi": [450, 0, 46, 35]},
+        {"type": "val",  "roi": [450, 0, 80, 35]},
         # Row 2
         {"type": "name", "roi": [0, 38, 185, 35]},
         {"type": "val",  "roi": [185, 38, 46, 35]},
         {"type": "name", "roi": [265, 38, 185, 35]},
-        {"type": "val",  "roi": [450, 38, 46, 35]},
+        {"type": "val",  "roi": [450, 38, 80, 35]},
     ]
     
     sub_stats = []
