@@ -27,15 +27,15 @@ def log_debug(msg: str):
 def scan_sub_stats(context: Context, image: np.ndarray, base_x: int, base_y: int):
     stat_rois = [
         # Row 1
-        {"type": "name", "roi": [0, 0, 200, 35]},
-        {"type": "val",  "roi": [210, 0, 46, 35]},
+        {"type": "name", "roi": [0, 0, 185, 35]},
+        {"type": "val",  "roi": [185, 0, 46, 35]},
         {"type": "name", "roi": [265, 0, 185, 35]},
-        {"type": "val",  "roi": [450, 0, 80, 35]},
+        {"type": "val",  "roi": [450, 0, 46, 35]},
         # Row 2
-        {"type": "name", "roi": [0, 38, 200, 35]},
-        {"type": "val",  "roi": [210, 38, 46, 35]},
+        {"type": "name", "roi": [0, 38, 185, 35]},
+        {"type": "val",  "roi": [185, 38, 46, 35]},
         {"type": "name", "roi": [265, 38, 185, 35]},
-        {"type": "val",  "roi": [450, 38, 80, 35]},
+        {"type": "val",  "roi": [450, 38, 46, 35]},
     ]
     
     sub_stats = []
@@ -112,15 +112,18 @@ def scan_sub_stats(context: Context, image: np.ndarray, base_x: int, base_y: int
                     sub_stats.append({current_key: val_clean})
                 else:
                     sub_stats.append({current_key: "???"})
-                    try:
-                        debug_dir = r"D:\word\MaaFramework\MaaPrincessConnect\install\debug"
-                        os.makedirs(debug_dir, exist_ok=True)
-                        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                        safe_key = "".join(x for x in current_key if x.isalnum())
-                        cv2.imwrite(rf"{debug_dir}\failed_ocr_{safe_key}_{ts}.png", crop_img)
-                        log_debug(f"[scan_sub_stats] Saved failed crop image to failed_ocr_{safe_key}_{ts}.png")
-                    except Exception as e:
-                        log_debug(f"[scan_sub_stats] Failed to save crop image: {e}")
+                    if "贯穿" in current_key:
+                        try:
+                            debug_dir = r"D:\word\MaaFramework\MaaPrincessConnect\install\debug"
+                            os.makedirs(debug_dir, exist_ok=True)
+                            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                            safe_key = "".join(x for x in current_key if x.isalnum())
+                            cv2.imwrite(rf"{debug_dir}\failed_ocr_{safe_key}_{ts}.png", crop_img)
+                            log_debug(f"[scan_sub_stats] Saved failed crop image to failed_ocr_{safe_key}_{ts}.png")
+                        except Exception as e:
+                            log_debug(f"[scan_sub_stats] Failed to save crop image: {e}")
+                        
+                        raise Exception(f"Failed to read OCR for penetration stat ({current_key}). Stopping task for debugging.")
                 current_key = None
                 
     return sub_stats
